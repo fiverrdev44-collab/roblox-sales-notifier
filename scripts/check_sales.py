@@ -26,22 +26,22 @@ GROUPS = {
     "Motion Works Inc": {
         "id": 181575178,
         "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
-        "image": "https://i.imgur.com/U5AgpzD.png",  # put your imgur (or any) image URL here
+        "image": "https://i.imgur.com/REPLACE_ME.png",  # put your imgur (or any) image URL here
     },
     "EroserisUGC": {
         "id": 376787388,
         "webhook": "https://discord.com/api/webhooks/1524376550055612588/xOUUzDz-1WdeyHJs-l1P4KVL8G-1-tbrxExz_zhtbVBXOcLWakbJU9vaDflgOLOOEVfK",
-        "image": "https://i.imgur.com/m8dVGql.png",
+        "image": "https://i.imgur.com/REPLACE_ME.png",
     },
     "Ami Berloga": {
         "id": 470988244,
         "webhook": "https://discord.com/api/webhooks/1524376555076190219/iTrQ_5pUSuBlvPP4m-ZYNzMopoDDI6AaJG4lJpEI-3p7kLaixwALBp5f2rt6Pnx0N9AN",
-        "image": "https://i.imgur.com/XG0Ikat.jpeg",
+        "image": "https://i.imgur.com/REPLACE_ME.png",
     },
 }
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_seen.json")
-DEBUG = False
+DEBUG = True
 
 # ---------------------------------------------------------------------------
 
@@ -124,10 +124,7 @@ def main() -> None:
         try:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
-                print(f"[{group_name}] rate limited (429), skipping this run — will retry next cycle")
-            else:
-                print(f"[{group_name}] fetch failed: {e}")
+            print(f"[{group_name}] fetch failed: {e}")
             continue
         except Exception as e:
             print(f"[{group_name}] unexpected error: {e}")
@@ -135,6 +132,8 @@ def main() -> None:
 
         if DEBUG and raw_transactions:
             print(json.dumps(raw_transactions[0], indent=2))
+
+        print(f"[{group_name}] fetched {len(raw_transactions)} transaction(s)")
 
         new_raw = []
         for txn in raw_transactions:
@@ -147,11 +146,8 @@ def main() -> None:
             post_to_discord(webhook, group_name, sale, image_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
-        # Everything below is now correctly inside the 'for' loop
         if raw_transactions:
             state[group_id] = raw_transactions[0].get("id")
-        
-        time.sleep(3) # This pause now correctly triggers between every group
 
     save_state(state)
     print("Check complete.")
