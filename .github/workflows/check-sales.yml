@@ -2,6 +2,9 @@ name: Check Roblox Sales
 
 on:
   workflow_dispatch: {}
+  # Optional: Uncomment the lines below to have it run every 5 minutes automatically
+  # schedule:
+  #   - cron: '*/5 * * * *'
 
 permissions:
   contents: write
@@ -13,8 +16,8 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
         with:
-          # This line is key: it uses the token for write access
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # CRITICAL: This ensures the full history is fetched for sync
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,6 +36,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 1. Pull the latest changes from GitHub first to avoid "fetch first" errors
+          git pull --rebase origin main
+          
+          # 2. Add the file and commit only if changes exist
           git add scripts/last_seen.json
-          # Only commit and push if there is actually a change
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen sales" && git push)
