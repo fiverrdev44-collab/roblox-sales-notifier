@@ -121,8 +121,8 @@ def main() -> None:
         image_url = cfg.get("image")
         last_seen_id = state.get(group_id)
 
+       # Remove the extra 'try:' line here
         try:
-         try:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
@@ -148,10 +148,10 @@ def main() -> None:
             post_to_discord(webhook, group_name, sale, image_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
-  if raw_transactions:
+if raw_transactions:
             state[group_id] = raw_transactions[0].get("id")
-
-        time.sleep(3)  # pause between groups to avoid Roblox rate limiting
+        
+        time.sleep(3) # This needs to be indented to align with line 152
 
     save_state(state)
     print("Check complete.")
