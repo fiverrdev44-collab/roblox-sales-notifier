@@ -1,34 +1,28 @@
 name: Check Roblox Sales
- 
+
 on:
-  schedule:
-    # Runs every 5 minutes. GitHub Actions schedules aren't perfectly
-    # precise under load and can run a few minutes late, but it's close
-    # enough for this purpose. Change */5 to a bigger number (e.g. */10)
-    # if you want it to run less often.
-    - cron: "*/5 * * * *"
-  workflow_dispatch: {}  # lets you manually trigger a run from the Actions tab, for testing
- 
+  workflow_dispatch: {}
+
 jobs:
   check-sales:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
- 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
- 
+
       - name: Install dependencies
         run: pip install requests
- 
+
       - name: Run sale checker
         env:
           ROBLOX_COOKIE: ${{ secrets.ROBLOX_COOKIE }}
         run: python scripts/check_sales.py
- 
+
       - name: Commit updated state file
         run: |
           git config user.name "github-actions[bot]"
