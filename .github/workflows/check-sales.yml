@@ -3,12 +3,18 @@ name: Check Roblox Sales
 on:
   workflow_dispatch: {}
 
+# ADD THIS BLOCK TO GRANT WRITE ACCESS
+permissions:
+  contents: write
+
 jobs:
   check-sales:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true # Ensures the token is available for git commands
 
       - name: Set up Python
         uses: actions/setup-python@v5
