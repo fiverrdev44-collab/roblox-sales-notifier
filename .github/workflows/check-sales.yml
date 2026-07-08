@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0  # CRITICAL: This ensures the full history is fetched for sync
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,9 +36,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 1. Pull the latest changes from GitHub first to avoid "fetch first" errors
+          # 1. Stage and commit the local change FIRST, so the working
+          #    tree is clean before we try to pull/rebase.
+          git add scripts/last_seen.json
+          git diff --staged --quiet || git commit -m "Update last seen sales"
+
+          # 2. Now it's safe to pull any changes that happened on the
+          #    remote since this run started (e.g. an overlapping run).
           git pull --rebase origin main
 
-          # 2. Add the file and commit only if changes exist
-          git add scripts/last_seen.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen sales" && git push)
+          # 3. Push. If there was nothing to commit, this is a harmless no-op.
+          git push
