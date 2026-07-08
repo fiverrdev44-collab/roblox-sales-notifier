@@ -33,7 +33,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 GROUPS = {
-    "Motion Works Inc": {
+    "Motion Works Emotes": {
         "id": 181575178,
         "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
         "image": "https://i.imgur.com/U5AgpzD.png",
@@ -43,7 +43,7 @@ GROUPS = {
         "webhook": "https://discord.com/api/webhooks/1524376550055612588/xOUUzDz-1WdeyHJs-l1P4KVL8G-1-tbrxExz_zhtbVBXOcLWakbJU9vaDflgOLOOEVfK",
         "image": "https://i.imgur.com/m8dVGql.png",
     },
-    "Ami Berloga": {
+    "Ami Berloga Clothing": {
         "id": 470988244,
         "webhook": "https://discord.com/api/webhooks/1524376555076190219/iTrQ_5pUSuBlvPP4m-ZYNzMopoDDI6AaJG4lJpEI-3p7kLaixwALBp5f2rt6Pnx0N9AN",
         "image": "https://i.imgur.com/XG0Ikat.jpeg",
