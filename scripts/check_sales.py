@@ -121,7 +121,6 @@ def main() -> None:
         image_url = cfg.get("image")
         last_seen_id = state.get(group_id)
 
-       # Remove the extra 'try:' line here
         try:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
@@ -148,10 +147,11 @@ def main() -> None:
             post_to_discord(webhook, group_name, sale, image_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
-if raw_transactions:
+        # Everything below is now correctly inside the 'for' loop
+        if raw_transactions:
             state[group_id] = raw_transactions[0].get("id")
         
-        time.sleep(3) # This needs to be indented to align with line 152
+        time.sleep(3) # This pause now correctly triggers between every group
 
     save_state(state)
     print("Check complete.")
