@@ -122,9 +122,13 @@ def main() -> None:
         last_seen_id = state.get(group_id)
 
         try:
+         try:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
-            print(f"[{group_name}] fetch failed: {e}")
+            if e.response is not None and e.response.status_code == 429:
+                print(f"[{group_name}] rate limited (429), skipping this run — will retry next cycle")
+            else:
+                print(f"[{group_name}] fetch failed: {e}")
             continue
         except Exception as e:
             print(f"[{group_name}] unexpected error: {e}")
@@ -144,8 +148,10 @@ def main() -> None:
             post_to_discord(webhook, group_name, sale, image_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
-        if raw_transactions:
+  if raw_transactions:
             state[group_id] = raw_transactions[0].get("id")
+
+        time.sleep(3)  # pause between groups to avoid Roblox rate limiting
 
     save_state(state)
     print("Check complete.")
