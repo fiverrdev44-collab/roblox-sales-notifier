@@ -104,6 +104,15 @@ def fetch_transactions(session: requests.Session, group_id: int) -> list:
     return r.json().get("data", [])
 
 
+def fetch_group_balance(session: requests.Session, group_id: int) -> int:
+    """Returns the group's current available Robux balance. Requires the
+    account to have 'View group funds' permission on the group."""
+    url = f"https://economy.roblox.com/v1/groups/{group_id}/currency"
+    r = session.get(url, timeout=15)
+    r.raise_for_status()
+    return r.json().get("robux", 0)
+
+
 def parse_transaction(txn: dict) -> dict:
     details = txn.get("details", {}) or {}
     return {
@@ -118,21 +127,28 @@ def parse_transaction(txn: dict) -> dict:
     }
 
 
-def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
+def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None,
+                     group_balance: int = None, pending_robux: int = None) -> None:
     if sale.get("buyer_id"):
         buyer_value = f"[{sale['buyer']}](https://www.roblox.com/users/{sale['buyer_id']}/profile)"
     else:
         buyer_value = sale["buyer"]
 
+    fields = [
+        {"name": "Item", "value": sale["item_name"], "inline": True},
+        {"name": "Type", "value": sale["item_type"], "inline": True},
+        {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
+        {"name": "Buyer", "value": buyer_value, "inline": True},
+    ]
+    if group_balance is not None:
+        fields.append({"name": "Group Balance", "value": f"{group_balance} R$", "inline": True})
+    if pending_robux is not None:
+        fields.append({"name": "Pending Robux", "value": f"{pending_robux} R$", "inline": True})
+
     embed = {
         "title": f"💰 New Sale — {group_name}",
         "color": 0x57F287,
-        "fields": [
-            {"name": "Item", "value": sale["item_name"], "inline": True},
-            {"name": "Type", "value": sale["item_type"], "inline": True},
-            {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
-            {"name": "Buyer", "value": buyer_value, "inline": True},
-        ],
+        "fields": fields,
         "footer": {"text": "Roblox Marketplace Sale"},
         "timestamp": sale.get("created") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -140,9 +156,19 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
         embed["thumbnail"] = {"url": image_url}
     if gif_url:
         embed["image"] = {"url": gif_url}  # renders large, below the fields
-    resp = requests.post(webhook_url, json={"embeds": [embed]}, timeout=15)
-    if resp.status_code >= 300:
-        print(f"[discord] webhook error {resp.status_code}: {resp.text}")
+
+    payload = {"embeds": [embed]}
+    max_retries = 3
+    for attempt in range(max_retries):
+        resp = requests.post(webhook_url, json=payload, timeout=15)
+        if resp.status_code == 429:
+            retry_after = resp.json().get("retry_after", 1.5)
+            print(f"[discord] rate limited, waiting {retry_after}s (attempt {attempt + 1}/{max_retries})")
+            time.sleep(retry_after)
+            continue
+        if resp.status_code >= 300:
+            print(f"[discord] webhook error {resp.status_code}: {resp.text}")
+        break
 
 
 def main() -> None:
@@ -182,24 +208,56 @@ def main() -> None:
             print(f"[{group_name}] first run for this group — seeding {len(current_tokens)} existing transaction(s), no alerts sent")
             group_state["tokens"] = current_tokens[:MAX_TOKENS_STORED_PER_GROUP]
             group_state["seeded"] = True
+            save_state(state)
             time.sleep(3)
             continue
 
         new_txns = [t for t in raw_transactions if t.get("purchaseToken") and t.get("purchaseToken") not in seen_tokens]
 
+        if new_txns:
+            # Only bother fetching balance/pending if we're actually about
+            # to post something -- no point on quiet cycles.
+            try:
+                group_balance = fetch_group_balance(session, int(group_id))
+            except Exception as e:
+                print(f"[{group_name}] could not fetch group balance: {e}")
+                group_balance = None
+
+            pending_robux = sum(
+                (t.get("currency", {}) or {}).get("amount", 0)
+                for t in raw_transactions
+                if t.get("isPending")
+            )
+
         for txn in reversed(new_txns):
             sale = parse_transaction(txn)
             if sale["is_pending"]:
                 print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
-            post_to_discord(webhook, group_name, sale, image_url, gif_url)
+            post_to_discord(webhook, group_name, sale, image_url, gif_url, group_balance, pending_robux)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
+
+            # Mark this specific token as seen and save immediately -- so
+            # if the run gets killed right after this post, this sale is
+            # still correctly recorded as "already posted."
+            if sale["token"] not in group_state["tokens"]:
+                group_state["tokens"].insert(0, sale["token"])
+                group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
+            save_state(state)
+
+            time.sleep(0.5)  # small buffer between posts to avoid Discord's burst rate limit
 
         merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
         group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
 
+        # Save immediately after each group, not just once at the very end.
+        # If this run gets killed/cancelled partway through (timeout,
+        # manual cancel, etc.), whatever was already posted for groups
+        # processed so far stays correctly recorded instead of being lost
+        # and re-posted as a "new" sale on the next run.
+        save_state(state)
+
         time.sleep(3)
 
-    save_state(state)
     print("Check complete.")
 
 
