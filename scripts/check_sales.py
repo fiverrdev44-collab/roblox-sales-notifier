@@ -104,15 +104,6 @@ def fetch_transactions(session: requests.Session, group_id: int) -> list:
     return r.json().get("data", [])
 
 
-def fetch_group_balance(session: requests.Session, group_id: int) -> int:
-    """Returns the group's current available Robux balance. Requires the
-    account to have 'View group funds' permission on the group."""
-    url = f"https://economy.roblox.com/v1/groups/{group_id}/currency"
-    r = session.get(url, timeout=15)
-    r.raise_for_status()
-    return r.json().get("robux", 0)
-
-
 def parse_transaction(txn: dict) -> dict:
     details = txn.get("details", {}) or {}
     return {
@@ -127,8 +118,7 @@ def parse_transaction(txn: dict) -> dict:
     }
 
 
-def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None,
-                     group_balance: int = None, pending_robux: int = None) -> None:
+def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
     if sale.get("buyer_id"):
         buyer_value = f"[{sale['buyer']}](https://www.roblox.com/users/{sale['buyer_id']}/profile)"
     else:
@@ -140,10 +130,6 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
         {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
         {"name": "Buyer", "value": buyer_value, "inline": True},
     ]
-    if group_balance is not None:
-        fields.append({"name": "Group Balance", "value": f"{group_balance} R$", "inline": True})
-    if pending_robux is not None:
-        fields.append({"name": "Pending Robux", "value": f"{pending_robux} R$", "inline": True})
 
     embed = {
         "title": f"💰 New Sale — {group_name}",
@@ -214,26 +200,11 @@ def main() -> None:
 
         new_txns = [t for t in raw_transactions if t.get("purchaseToken") and t.get("purchaseToken") not in seen_tokens]
 
-        if new_txns:
-            # Only bother fetching balance/pending if we're actually about
-            # to post something -- no point on quiet cycles.
-            try:
-                group_balance = fetch_group_balance(session, int(group_id))
-            except Exception as e:
-                print(f"[{group_name}] could not fetch group balance: {e}")
-                group_balance = None
-
-            pending_robux = sum(
-                (t.get("currency", {}) or {}).get("amount", 0)
-                for t in raw_transactions
-                if t.get("isPending")
-            )
-
         for txn in reversed(new_txns):
             sale = parse_transaction(txn)
             if sale["is_pending"]:
                 print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
-            post_to_discord(webhook, group_name, sale, image_url, gif_url, group_balance, pending_robux)
+            post_to_discord(webhook, group_name, sale, image_url, gif_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
             # Mark this specific token as seen and save immediately -- so
