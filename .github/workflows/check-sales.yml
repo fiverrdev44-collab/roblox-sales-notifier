@@ -37,6 +37,7 @@ jobs:
         run: python scripts/check_sales.py
 
       - name: Commit updated state file
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
