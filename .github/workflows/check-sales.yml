@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: check-roblox-sales
+  cancel-in-progress: false
+
 jobs:
   check-sales:
     runs-on: ubuntu-latest
