@@ -112,12 +112,18 @@ def parse_transaction(txn: dict) -> dict:
         "item_type": details.get("type", "Item"),
         "revenue": (txn.get("currency", {}) or {}).get("amount", 0),
         "buyer": (txn.get("agent", {}) or {}).get("name", "Unknown"),
+        "buyer_id": (txn.get("agent", {}) or {}).get("id"),
         "created": txn.get("created"),
         "is_pending": txn.get("isPending", False),
     }
 
 
 def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
+    if sale.get("buyer_id"):
+        buyer_value = f"[{sale['buyer']}](https://www.roblox.com/users/{sale['buyer_id']}/profile)"
+    else:
+        buyer_value = sale["buyer"]
+
     embed = {
         "title": f"💰 New Sale — {group_name}",
         "color": 0x57F287,
@@ -125,7 +131,7 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
             {"name": "Item", "value": sale["item_name"], "inline": True},
             {"name": "Type", "value": sale["item_type"], "inline": True},
             {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
-            {"name": "Buyer", "value": sale["buyer"], "inline": True},
+            {"name": "Buyer", "value": buyer_value, "inline": True},
         ],
         "footer": {"text": "Roblox Marketplace Sale"},
         "timestamp": sale.get("created") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
