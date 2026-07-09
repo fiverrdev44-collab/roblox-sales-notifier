@@ -33,20 +33,23 @@ import requests
 # ---------------------------------------------------------------------------
 
 GROUPS = {
-    "Motion Works Emotes": {
+    "Motion Works Inc": {
         "id": 181575178,
         "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
         "image": "https://i.imgur.com/U5AgpzD.png",
+        "gif": "https://i.imgur.com/GT2D0SG.gif",  # big gif shown below the embed fields
     },
     "EroserisUGC": {
         "id": 376787388,
         "webhook": "https://discord.com/api/webhooks/1524376550055612588/xOUUzDz-1WdeyHJs-l1P4KVL8G-1-tbrxExz_zhtbVBXOcLWakbJU9vaDflgOLOOEVfK",
         "image": "https://i.imgur.com/m8dVGql.png",
+        "gif": "https://i.imgur.com/GT2D0SG.gif",
     },
-    "Ami Berloga Clothing": {
+    "Ami Berloga": {
         "id": 470988244,
         "webhook": "https://discord.com/api/webhooks/1524376555076190219/iTrQ_5pUSuBlvPP4m-ZYNzMopoDDI6AaJG4lJpEI-3p7kLaixwALBp5f2rt6Pnx0N9AN",
         "image": "https://i.imgur.com/XG0Ikat.jpeg",
+        "gif": "https://i.imgur.com/GT2D0SG.gif",
     },
 }
 
@@ -116,7 +119,7 @@ def parse_transaction(txn: dict) -> dict:
     }
 
 
-def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None) -> None:
+def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
     embed = {
         "title": f"💰 New Sale — {group_name}",
         "color": 0x57F287,
@@ -130,6 +133,8 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
     }
     if image_url:
         embed["thumbnail"] = {"url": image_url}
+    if gif_url:
+        embed["image"] = {"url": gif_url}  # renders large, below the fields
     resp = requests.post(webhook_url, json={"embeds": [embed]}, timeout=15)
     if resp.status_code >= 300:
         print(f"[discord] webhook error {resp.status_code}: {resp.text}")
@@ -143,6 +148,7 @@ def main() -> None:
         group_id = str(cfg["id"])
         webhook = cfg["webhook"]
         image_url = cfg.get("image")
+        gif_url = cfg.get("gif")
         group_state = state.setdefault(group_id, {"tokens": [], "seeded": False})
         seen_tokens = set(group_state["tokens"])
 
@@ -186,7 +192,7 @@ def main() -> None:
                 # Still post it -- it's a real new sale -- but note it may
                 # not have a final settled id/status yet.
                 print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
-            post_to_discord(webhook, group_name, sale, image_url)
+            post_to_discord(webhook, group_name, sale, image_url, gif_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
         # Update the stored token list: newest tokens from this fetch,
