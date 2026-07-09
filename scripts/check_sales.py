@@ -37,19 +37,19 @@ GROUPS = {
         "id": 181575178,
         "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
         "image": "https://i.imgur.com/U5AgpzD.png",
-        "gif": "https://i.imgur.com/GT2D0SG.gif",  # big gif shown below the embed fields
+        "gif": "https://i.imgur.com/HMpal07.gif",  # big gif shown below the embed fields
     },
     "Eroseris UGC Group": {
         "id": 376787388,
         "webhook": "https://discord.com/api/webhooks/1524376550055612588/xOUUzDz-1WdeyHJs-l1P4KVL8G-1-tbrxExz_zhtbVBXOcLWakbJU9vaDflgOLOOEVfK",
         "image": "https://i.imgur.com/m8dVGql.png",
-        "gif": "https://i.imgur.com/GT2D0SG.gif",
+        "gif": "https://i.imgur.com/HMpal07.gif",
     },
     "Ami Berloga Clothing Group": {
         "id": 470988244,
         "webhook": "https://discord.com/api/webhooks/1524376555076190219/iTrQ_5pUSuBlvPP4m-ZYNzMopoDDI6AaJG4lJpEI-3p7kLaixwALBp5f2rt6Pnx0N9AN",
         "image": "https://i.imgur.com/XG0Ikat.jpeg",
-        "gif": "https://i.imgur.com/GT2D0SG.gif",
+        "gif": "https://i.imgur.com/HMpal07.gif",
     },
 }
 
