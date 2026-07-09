@@ -1,13 +1,15 @@
 name: Check Roblox Sales
 
+concurrency:
+  group: check-sales
+  cancel-in-progress: false
+
 on:
   workflow_dispatch: {}
   schedule:
     - cron: '*/5 * * * *'
-
 permissions:
   contents: write
-
 jobs:
   check-sales:
     runs-on: ubuntu-latest
@@ -17,33 +19,21 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install dependencies
         run: pip install requests
-
       - name: Run sale checker
         env:
           ROBLOX_COOKIE: ${{ secrets.ROBLOX_COOKIE }}
         run: python scripts/check_sales.py
-
       - name: Commit updated state file
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 1. Stage and commit the local change FIRST, so the working
-          #    tree is clean before we try to pull/rebase.
           git add scripts/last_seen.json
           git diff --staged --quiet || git commit -m "Update last seen sales"
-
-          # 2. Now it's safe to pull any changes that happened on the
-          #    remote since this run started (e.g. an overlapping run).
           git pull --rebase origin main
-
-          # 3. Push. If there was nothing to commit, this is a harmless no-op.
           git push
