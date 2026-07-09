@@ -82,9 +82,6 @@ def load_state() -> dict:
     else:
         raw = {}
 
-    # Migrate old format (group_id -> single last-seen id number) into the
-    # new format (group_id -> {"tokens": [...], "seeded": bool}) so old
-    # state files don't crash this version.
     migrated = {}
     for group_id, value in raw.items():
         if isinstance(value, dict) and "tokens" in value:
@@ -114,6 +111,7 @@ def parse_transaction(txn: dict) -> dict:
         "item_name": details.get("name", "Unknown Item"),
         "item_type": details.get("type", "Item"),
         "revenue": (txn.get("currency", {}) or {}).get("amount", 0),
+        "buyer": (txn.get("agent", {}) or {}).get("name", "Unknown"),
         "created": txn.get("created"),
         "is_pending": txn.get("isPending", False),
     }
@@ -127,6 +125,7 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
             {"name": "Item", "value": sale["item_name"], "inline": True},
             {"name": "Type", "value": sale["item_type"], "inline": True},
             {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
+            {"name": "Buyer", "value": sale["buyer"], "inline": True},
         ],
         "footer": {"text": "Roblox Marketplace Sale"},
         "timestamp": sale.get("created") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -174,9 +173,6 @@ def main() -> None:
         current_tokens = [t.get("purchaseToken") for t in raw_transactions if t.get("purchaseToken")]
 
         if not group_state["seeded"]:
-            # First run ever for this group: don't spam Discord with the
-            # entire existing sales history, just record what's currently
-            # there as "already seen" and start alerting from the next run.
             print(f"[{group_name}] first run for this group — seeding {len(current_tokens)} existing transaction(s), no alerts sent")
             group_state["tokens"] = current_tokens[:MAX_TOKENS_STORED_PER_GROUP]
             group_state["seeded"] = True
@@ -185,18 +181,13 @@ def main() -> None:
 
         new_txns = [t for t in raw_transactions if t.get("purchaseToken") and t.get("purchaseToken") not in seen_tokens]
 
-        # Post oldest-of-the-new first so Discord shows them in order.
         for txn in reversed(new_txns):
             sale = parse_transaction(txn)
             if sale["is_pending"]:
-                # Still post it -- it's a real new sale -- but note it may
-                # not have a final settled id/status yet.
                 print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
             post_to_discord(webhook, group_name, sale, image_url, gif_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
 
-        # Update the stored token list: newest tokens from this fetch,
-        # capped so the file doesn't grow forever.
         merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
         group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
 
