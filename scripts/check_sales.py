@@ -68,7 +68,7 @@ if not ROBLOSECURITY:
 def get_session() -> requests.Session:
     session = requests.Session()
     session.cookies[".ROBLOSECURITY"] = ROBLOSECURITY
-    r = session.post("https://auth.roblox.com/v2/logout")
+    r = session.post("https://auth.roblox.com/v2/logout", timeout=15)
     token = r.headers.get("x-csrf-token")
     if token:
         session.headers.update({"x-csrf-token": token})
