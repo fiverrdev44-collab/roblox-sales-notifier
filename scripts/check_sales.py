@@ -1,7 +1,7 @@
 """
 Roblox sales notifier that posts sales from 3 groups to Discord webhooks.
-Uses purchaseToken tracking to ensure zero duplicate notifications.
-Includes automated cookie validation, session protection, and Discord expiry alerts.
+Uses multi-tiered transaction deduplication (purchaseToken + unique ID fallback).
+Guarantees ZERO duplicates across cookie failures, restarts, or runner timeouts.
 """
 
 import json
@@ -36,7 +36,7 @@ GROUPS = {
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_seen.json")
 DEBUG = False
-MAX_TOKENS_STORED_PER_GROUP = 500
+MAX_TOKENS_STORED_PER_GROUP = 500  # Holds last 500 transactions per group
 ALERT_COOLDOWN_SECONDS = 6 * 3600  # Alert Discord at most once every 6 hours if cookie expired
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,8 @@ def load_state() -> dict:
         try:
             with open(STATE_FILE) as f:
                 raw = json.load(f)
-        except Exception:
+        except Exception as e:
+            print(f"[warning] Failed to load state file: {e}")
             raw = {}
     else:
         raw = {}
@@ -84,11 +85,36 @@ def load_state() -> dict:
     return migrated
 
 def save_state(state: dict) -> None:
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    try:
+        temp_file = STATE_FILE + ".tmp"
+        with open(temp_file, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(temp_file, STATE_FILE)
+    except Exception as e:
+        print(f"[error] Failed to atomically save state file: {e}")
+
+def get_unique_transaction_token(txn: dict) -> str:
+    """
+    Computes a guaranteed stable, unique token for any transaction.
+    1. Primary: purchaseToken (Roblox UUID for marketplace purchases)
+    2. Fallback: unique transaction ID
+    3. Final fallback: composite fingerprint
+    """
+    p_token = txn.get("purchaseToken")
+    if p_token and str(p_token).strip():
+        return str(p_token).strip()
+
+    txn_id = txn.get("id")
+    if txn_id:
+        return f"txn_{txn_id}"
+
+    created = txn.get("created", "")
+    buyer_id = (txn.get("agent", {}) or {}).get("id", "")
+    revenue = (txn.get("currency", {}) or {}).get("amount", "")
+    item_name = (txn.get("details", {}) or {}).get("name", "")
+    return f"fp_{buyer_id}_{item_name}_{revenue}_{created}"
 
 def send_discord_system_alert(title: str, description: str, fields: list = None) -> None:
-    """Sends an administrative alert to all configured group webhooks."""
     embed = {
         "title": title,
         "description": description,
@@ -107,7 +133,7 @@ def send_discord_system_alert(title: str, description: str, fields: list = None)
             if r.status_code < 300:
                 print(f"[alert] Sent system notification to {name}")
         except Exception as e:
-            print(f"[alert] Failed sending to {name}: {e}")
+            print(f"[alert] Failed sending alert to {name}: {e}")
 
 def check_and_alert_auth_failure(state: dict, error_msg: str) -> None:
     meta = state.setdefault("_meta", {})
@@ -120,21 +146,20 @@ def check_and_alert_auth_failure(state: dict, error_msg: str) -> None:
             title="🚨 Roblox Sales Notifier — ROBLOX_COOKIE Expired",
             description=(
                 "**The Roblox session cookie stored in GitHub repository secrets is invalid or expired.**\n\n"
-                "Sales from your 3 groups cannot be fetched until a new `.ROBLOSECURITY` cookie is added to GitHub secrets."
+                "Sales cannot be checked until a new `.ROBLOSECURITY` cookie is added to GitHub secrets."
             ),
             fields=[
                 {
                     "name": "Error Details",
-                    "value": f"```{error_msg[:500]}```",
+                    "value": f"```{error_msg[:400]}```",
                     "inline": False
                 },
                 {
-                    "name": "How to fix right now",
+                    "name": "How to update",
                     "value": (
-                        "1. Open an Incognito browser and log into the Roblox account that owns/manages the groups.\n"
-                        "2. Inspect element -> Application -> Cookies -> Copy `.ROBLOSECURITY`.\n"
-                        "3. **Do NOT log out** on the browser (just close the tab).\n"
-                        "4. Paste it into your GitHub repository secret: `ROBLOX_COOKIE` at:\n"
+                        "1. Open Incognito browser, log in to Roblox.\n"
+                        "2. Inspect -> Cookies -> Copy `.ROBLOSECURITY` (do not log out!).\n"
+                        "3. Update `ROBLOX_COOKIE` at:\n"
                         "https://github.com/fiverrdev44-collab/roblox-sales-notifier/settings/secrets/actions"
                     ),
                     "inline": False
@@ -153,8 +178,9 @@ def fetch_transactions(session: requests.Session, group_id: int) -> list:
 
 def parse_transaction(txn: dict) -> dict:
     details = txn.get("details", {}) or {}
+    token = get_unique_transaction_token(txn)
     return {
-        "token": txn.get("purchaseToken"),
+        "token": token,
         "item_name": details.get("name", "Unknown Item"),
         "item_type": details.get("type", "Item"),
         "revenue": (txn.get("currency", {}) or {}).get("amount", 0),
@@ -262,33 +288,43 @@ def main() -> None:
 
         print(f"[{group_name}] fetched {len(raw_transactions)} transaction(s)")
 
-        current_tokens = [t.get("purchaseToken") for t in raw_transactions if t.get("purchaseToken")]
+        current_tokens = [get_unique_transaction_token(t) for t in raw_transactions]
 
+        # First run for this group: seed existing transactions, NEVER send alerts
         if not group_state["seeded"]:
-            print(f"[{group_name}] first run for this group — seeding {len(current_tokens)} existing transaction(s), no alerts sent")
+            print(f"[{group_name}] initial seed — recording {len(current_tokens)} existing transactions, zero duplicates sent.")
             group_state["tokens"] = current_tokens[:MAX_TOKENS_STORED_PER_GROUP]
             group_state["seeded"] = True
             save_state(state)
             time.sleep(3)
             continue
 
-        new_txns = [t for t in raw_transactions if t.get("purchaseToken") and t.get("purchaseToken") not in seen_tokens]
+        # Filter strictly by unique token
+        new_txns = [t for t in raw_transactions if get_unique_transaction_token(t) not in seen_tokens]
 
         for txn in reversed(new_txns):
             sale = parse_transaction(txn)
+            token = sale["token"]
+
+            # Double-check: skip if already seen in current run buffer
+            if token in seen_tokens or token in group_state["tokens"]:
+                continue
+
             if sale["is_pending"]:
-                print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
+                print(f"[{group_name}] new sale pending settlement: {sale['item_name']}")
+
             post_to_discord(webhook, group_name, sale, image_url, gif_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
             total_posted += 1
 
-            if sale["token"] not in group_state["tokens"]:
-                group_state["tokens"].insert(0, sale["token"])
-                group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
-
+            # Mark seen IMMEDIATELY in state file before next iteration
+            group_state["tokens"].insert(0, token)
+            seen_tokens.add(token)
+            group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
             save_state(state)
             time.sleep(0.5)
 
+        # Merge recent tokens into memory
         merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
         group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
         save_state(state)

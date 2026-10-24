@@ -16,6 +16,7 @@ jobs:
   check-sales:
     runs-on: ubuntu-latest
     timeout-minutes: 3
+
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -41,15 +42,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 1. Stage and commit the local change FIRST, so the working
-          #    tree is clean before we try to pull/rebase.
           git add scripts/last_seen.json
-          git diff --staged --quiet || git commit -m "Update last seen sales"
-
-          # 2. Now it's safe to pull any changes that happened on the
-          #    remote since this run started (e.g. an overlapping run).
-          git pull --rebase origin main
-
-          # 3. Push. If there was nothing to commit, this is a harmless no-op.
-          git push
+          if ! git diff --staged --quiet; then
+            git commit -m "Update last seen sales"
+            # Pull with rebase, retry up to 3 times to ensure state is committed cleanly
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break || sleep 2
+            done
+          fi
