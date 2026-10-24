@@ -1,25 +1,7 @@
 """
-Roblox Group Marketplace Sale -> Discord Notifier (single-run version)
-------------------------------------------------------------------------
-Same idea as the standalone version, but designed to run ONCE per
-invocation (checks all groups, posts any new sales, then exits) instead
-of looping forever. This is meant to be triggered on a schedule by
-GitHub Actions (see .github/workflows/check-sales.yml), which is free
-to run indefinitely.
-
-State is stored in scripts/last_seen.json, which the GitHub Actions
-workflow commits back to the repo after each run so it persists between
-runs.
-
-DEDUPLICATION NOTE:
-Roblox assigns "id": 0 to transactions that are still "isPending": true
-(a short holding period before a sale is finalized). Because of that, a
-transaction's "id" is NOT a reliable unique identifier by itself -- a
-pending sale can sit at id 0 for a while before getting a real id once
-it settles. Tracking "id" as a single moving cursor incorrectly treated
-every pending sale as "already seen," so this version instead tracks
-the set of "purchaseToken" values already posted (a stable unique string
-present on every transaction regardless of pending status).
+Roblox sales notifier that posts sales from 3 groups to Discord webhooks.
+Uses purchaseToken tracking to ensure zero duplicate notifications.
+Includes automated cookie validation, session protection, and Discord expiry alerts.
 """
 
 import json
@@ -29,15 +11,14 @@ import time
 import requests
 
 # ---------------------------------------------------------------------------
-# CONFIG - fill this in
+# CONFIG
 # ---------------------------------------------------------------------------
-
 GROUPS = {
     "Motion Works Emote Group": {
         "id": 181575178,
         "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
         "image": "https://i.imgur.com/U5AgpzD.png",
-        "gif": "https://i.imgur.com/hzuqdBR.gif",  # big gif shown below the embed fields
+        "gif": "https://i.imgur.com/hzuqdBR.gif",
     },
     "Eroseris UGC Group": {
         "id": 376787388,
@@ -55,46 +36,113 @@ GROUPS = {
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_seen.json")
 DEBUG = False
-MAX_TOKENS_STORED_PER_GROUP = 500  # cap so the state file doesn't grow forever
+MAX_TOKENS_STORED_PER_GROUP = 500
+ALERT_COOLDOWN_SECONDS = 6 * 3600  # Alert Discord at most once every 6 hours if cookie expired
 
 # ---------------------------------------------------------------------------
-
-ROBLOSECURITY = os.environ.get("ROBLOX_COOKIE")
-if not ROBLOSECURITY:
-    print("ERROR: ROBLOX_COOKIE environment variable is not set.")
-    sys.exit(1)
-
+raw_cookie = os.environ.get("ROBLOX_COOKIE", "").strip()
+if (raw_cookie.startswith('"') and raw_cookie.endswith('"')) or (raw_cookie.startswith("'") and raw_cookie.endswith("'")):
+    raw_cookie = raw_cookie[1:-1].strip()
 
 def get_session() -> requests.Session:
     session = requests.Session()
-    session.cookies[".ROBLOSECURITY"] = ROBLOSECURITY
-    r = session.post("https://auth.roblox.com/v2/logout", timeout=15)
-    token = r.headers.get("x-csrf-token")
-    if token:
-        session.headers.update({"x-csrf-token": token})
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": "https://www.roblox.com",
+        "Referer": "https://www.roblox.com/",
+    })
+    session.cookies[".ROBLOSECURITY"] = raw_cookie
+    try:
+        r = session.post("https://auth.roblox.com/v2/logout", timeout=15)
+        token = r.headers.get("x-csrf-token")
+        if token:
+            session.headers.update({"x-csrf-token": token})
+    except Exception as e:
+        print(f"[warning] CSRF fetch error: {e}")
     return session
-
 
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            raw = json.load(f)
+        try:
+            with open(STATE_FILE) as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
     else:
         raw = {}
 
     migrated = {}
     for group_id, value in raw.items():
-        if isinstance(value, dict) and "tokens" in value:
+        if group_id == "_meta":
+            migrated["_meta"] = value
+        elif isinstance(value, dict) and "tokens" in value:
             migrated[group_id] = value
         else:
             migrated[group_id] = {"tokens": [], "seeded": False}
     return migrated
 
-
 def save_state(state: dict) -> None:
     with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+        json.dump(state, f, indent=2)
 
+def send_discord_system_alert(title: str, description: str, fields: list = None) -> None:
+    """Sends an administrative alert to all configured group webhooks."""
+    embed = {
+        "title": title,
+        "description": description,
+        "color": 0xED4245,  # Red
+        "fields": fields or [],
+        "footer": {"text": "Roblox Sales Notifier Monitor"},
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    payload = {"embeds": [embed]}
+    for name, cfg in GROUPS.items():
+        webhook = cfg.get("webhook")
+        if not webhook:
+            continue
+        try:
+            r = requests.post(webhook, json=payload, timeout=10)
+            if r.status_code < 300:
+                print(f"[alert] Sent system notification to {name}")
+        except Exception as e:
+            print(f"[alert] Failed sending to {name}: {e}")
+
+def check_and_alert_auth_failure(state: dict, error_msg: str) -> None:
+    meta = state.setdefault("_meta", {})
+    now = time.time()
+    last_alert = meta.get("last_auth_alert", 0)
+
+    if now - last_alert > ALERT_COOLDOWN_SECONDS:
+        print("[auth] Sending cookie expiration alert to Discord...")
+        send_discord_system_alert(
+            title="🚨 Roblox Sales Notifier — ROBLOX_COOKIE Expired",
+            description=(
+                "**The Roblox session cookie stored in GitHub repository secrets is invalid or expired.**\n\n"
+                "Sales from your 3 groups cannot be fetched until a new `.ROBLOSECURITY` cookie is added to GitHub secrets."
+            ),
+            fields=[
+                {
+                    "name": "Error Details",
+                    "value": f"```{error_msg[:500]}```",
+                    "inline": False
+                },
+                {
+                    "name": "How to fix right now",
+                    "value": (
+                        "1. Open an Incognito browser and log into the Roblox account that owns/manages the groups.\n"
+                        "2. Inspect element -> Application -> Cookies -> Copy `.ROBLOSECURITY`.\n"
+                        "3. **Do NOT log out** on the browser (just close the tab).\n"
+                        "4. Paste it into your GitHub repository secret: `ROBLOX_COOKIE` at:\n"
+                        "https://github.com/fiverrdev44-collab/roblox-sales-notifier/settings/secrets/actions"
+                    ),
+                    "inline": False
+                }
+            ]
+        )
+        meta["last_auth_alert"] = now
+        save_state(state)
 
 def fetch_transactions(session: requests.Session, group_id: int) -> list:
     url = f"https://economy.roblox.com/v2/groups/{group_id}/transactions"
@@ -102,7 +150,6 @@ def fetch_transactions(session: requests.Session, group_id: int) -> list:
     r = session.get(url, params=params, timeout=15)
     r.raise_for_status()
     return r.json().get("data", [])
-
 
 def parse_transaction(txn: dict) -> dict:
     details = txn.get("details", {}) or {}
@@ -116,7 +163,6 @@ def parse_transaction(txn: dict) -> dict:
         "created": txn.get("created"),
         "is_pending": txn.get("isPending", False),
     }
-
 
 def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
     if sale.get("buyer_id"):
@@ -141,9 +187,10 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
     if image_url:
         embed["thumbnail"] = {"url": image_url}
     if gif_url:
-        embed["image"] = {"url": gif_url}  # renders large, below the fields
+        embed["image"] = {"url": gif_url}
 
     payload = {"embeds": [embed]}
+
     max_retries = 3
     for attempt in range(max_retries):
         resp = requests.post(webhook_url, json=payload, timeout=15)
@@ -156,16 +203,42 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
             print(f"[discord] webhook error {resp.status_code}: {resp.text}")
         break
 
-
 def main() -> None:
-    session = get_session()
     state = load_state()
+
+    if not raw_cookie:
+        err = "ERROR: ROBLOX_COOKIE environment variable is empty or not set."
+        print(err)
+        check_and_alert_auth_failure(state, err)
+        sys.exit(1)
+
+    session = get_session()
+
+    # Pre-flight check: Test Roblox authentication
+    auth_check_url = "https://users.roblox.com/v1/users/authenticated"
+    try:
+        auth_res = session.get(auth_check_url, timeout=15)
+        if auth_res.status_code == 200:
+            user_info = auth_res.json()
+            print(f"[auth] Successfully authenticated as Roblox user: {user_info.get('name')} (ID: {user_info.get('id')})")
+        else:
+            err_msg = f"Roblox authentication check failed ({auth_res.status_code}): {auth_res.text}"
+            print(f"[auth] {err_msg}")
+            check_and_alert_auth_failure(state, err_msg)
+            # Fail the step so GitHub Actions reports the real error
+            sys.exit(1)
+    except Exception as e:
+        print(f"[auth] Warning during auth precheck: {e}")
+
+    total_posted = 0
+    had_auth_error = False
 
     for group_name, cfg in GROUPS.items():
         group_id = str(cfg["id"])
         webhook = cfg["webhook"]
         image_url = cfg.get("image")
         gif_url = cfg.get("gif")
+
         group_state = state.setdefault(group_id, {"tokens": [], "seeded": False})
         seen_tokens = set(group_state["tokens"])
 
@@ -173,7 +246,10 @@ def main() -> None:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
-            if status == 429:
+            if status == 401:
+                print(f"[{group_name}] Unauthorized (401) - Cookie expired or lacking permission for group {group_id}")
+                had_auth_error = True
+            elif status == 429:
                 print(f"[{group_name}] rate limited (429), skipping this run — will retry next cycle")
             else:
                 print(f"[{group_name}] fetch failed: {e}")
@@ -185,8 +261,6 @@ def main() -> None:
             continue
 
         print(f"[{group_name}] fetched {len(raw_transactions)} transaction(s)")
-        if DEBUG and raw_transactions:
-            print(json.dumps(raw_transactions[0], indent=2))
 
         current_tokens = [t.get("purchaseToken") for t in raw_transactions if t.get("purchaseToken")]
 
@@ -206,31 +280,25 @@ def main() -> None:
                 print(f"[{group_name}] new sale is pending settlement: {sale['item_name']}")
             post_to_discord(webhook, group_name, sale, image_url, gif_url)
             print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
+            total_posted += 1
 
-            # Mark this specific token as seen and save immediately -- so
-            # if the run gets killed right after this post, this sale is
-            # still correctly recorded as "already posted."
             if sale["token"] not in group_state["tokens"]:
                 group_state["tokens"].insert(0, sale["token"])
                 group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
-            save_state(state)
 
-            time.sleep(0.5)  # small buffer between posts to avoid Discord's burst rate limit
+            save_state(state)
+            time.sleep(0.5)
 
         merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
         group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
-
-        # Save immediately after each group, not just once at the very end.
-        # If this run gets killed/cancelled partway through (timeout,
-        # manual cancel, etc.), whatever was already posted for groups
-        # processed so far stays correctly recorded instead of being lost
-        # and re-posted as a "new" sale on the next run.
         save_state(state)
-
         time.sleep(3)
 
-    print("Check complete.")
+    if had_auth_error:
+        check_and_alert_auth_failure(state, "One or more group transaction requests returned 401 Unauthorized.")
+        sys.exit(1)
 
+    print(f"Check complete. Total new sales posted this run: {total_posted}")
 
 if __name__ == "__main__":
     main()
