@@ -35,6 +35,9 @@ jobs:
       - name: Run sale checker
         env:
           ROBLOX_COOKIE: ${{ secrets.ROBLOX_COOKIE }}
+          WEBHOOK_MOTION_WORKS: ${{ secrets.WEBHOOK_MOTION_WORKS }}
+          WEBHOOK_EROSERIS: ${{ secrets.WEBHOOK_EROSERIS }}
+          WEBHOOK_AMI_BERLOGA: ${{ secrets.WEBHOOK_AMI_BERLOGA }}
         run: python scripts/check_sales.py
 
       - name: Commit updated state file
@@ -45,7 +48,6 @@ jobs:
           git add scripts/last_seen.json
           if ! git diff --staged --quiet; then
             git commit -m "Update last seen sales"
-            # Pull with rebase, retry up to 3 times to ensure state is committed cleanly
             for i in 1 2 3; do
               git pull --rebase origin main && git push && break || sleep 2
             done

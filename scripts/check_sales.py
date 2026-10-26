@@ -16,17 +16,17 @@ import requests
 GROUPS = {
     "Motion Works Emote Group": {
         "id": 181575178,
-        "webhook": "https://discord.com/api/webhooks/1524376540610297926/oNWFWnYYeSA0fY5C8O_QvAKQPbJcfgRk5H4TcQSVVj9fbb0a3ng2aR5TPg7oCrbbQwwL",
+        "webhook": os.environ.get("WEBHOOK_MOTION_WORKS", "").strip(),
         "gif": "https://i.imgur.com/7HcNbSN.png",
     },
     "Eroseris UGC Group": {
         "id": 376787388,
-        "webhook": "https://discord.com/api/webhooks/1524376550055612588/xOUUzDz-1WdeyHJs-l1P4KVL8G-1-tbrxExz_zhtbVBXOcLWakbJU9vaDflgOLOOEVfK",
+        "webhook": os.environ.get("WEBHOOK_EROSERIS", "").strip(),
         "gif": "https://i.imgur.com/2hPH2Hl.png",
     },
     "Ami Berloga Clothing Group": {
         "id": 470988244,
-        "webhook": "https://discord.com/api/webhooks/1524376555076190219/iTrQ_5pUSuBlvPP4m-ZYNzMopoDDI6AaJG4lJpEI-3p7kLaixwALBp5f2rt6Pnx0N9AN",
+        "webhook": os.environ.get("WEBHOOK_AMI_BERLOGA", "").strip(),
         "gif": "https://i.imgur.com/D62FF8H.jpeg",
     },
 }
@@ -259,6 +259,9 @@ def main() -> None:
     for group_name, cfg in GROUPS.items():
         group_id = str(cfg["id"])
         webhook = cfg["webhook"]
+        if not webhook:
+            print(f"[{group_name}] webhook secret is not set, skipping Discord alert.")
+            continue
         image_url = cfg.get("image")
         gif_url = cfg.get("gif")
 
