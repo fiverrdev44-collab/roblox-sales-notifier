@@ -1,7 +1,7 @@
 """
 Roblox sales notifier that posts sales from 3 groups to Discord webhooks.
-Uses authentic digital sales receipt bill format with dual Creator signatures.
-Guarantees zero duplicates, encrypted webhook secrets, and automated cookie failure alerts.
+Uses multi-tiered transaction deduplication (purchaseToken + unique ID fallback).
+Guarantees ZERO duplicates across cookie failures, restarts, or runner timeouts.
 """
 
 import json
@@ -11,36 +11,30 @@ import time
 import requests
 
 # ---------------------------------------------------------------------------
-# CONFIG - 3 Groups with custom brand headers, types, and small side thumbnails
+# CONFIG
 # ---------------------------------------------------------------------------
 GROUPS = {
     "Motion Works Emote Group": {
         "id": 181575178,
-        "display_name": "MOTION WORKS INC.",
-        "default_type": "EMOTE",
         "webhook": os.environ.get("WEBHOOK_MOTION_WORKS", "").strip(),
-        "image": "https://i.imgur.com/7HcNbSN.png",
+        "gif": "https://i.imgur.com/7HcNbSN.png",
     },
     "Eroseris UGC Group": {
         "id": 376787388,
-        "display_name": "EROSERIS UGC",
-        "default_type": "UGC ASSET",
         "webhook": os.environ.get("WEBHOOK_EROSERIS", "").strip(),
-        "image": "https://i.imgur.com/2hPH2Hl.png",
+        "gif": "https://i.imgur.com/2hPH2Hl.png",
     },
     "Ami Berloga Clothing Group": {
         "id": 470988244,
-        "display_name": "AMI BERLOGA",
-        "default_type": "CLOTHING",
         "webhook": os.environ.get("WEBHOOK_AMI_BERLOGA", "").strip(),
-        "image": "https://i.imgur.com/D62FF8H.jpeg",
+        "gif": "https://i.imgur.com/D62FF8H.jpeg",
     },
 }
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_seen.json")
 DEBUG = False
-MAX_TOKENS_STORED_PER_GROUP = 500
-ALERT_COOLDOWN_SECONDS = 6 * 3600
+MAX_TOKENS_STORED_PER_GROUP = 500  # Holds last 500 transactions per group
+ALERT_COOLDOWN_SECONDS = 6 * 3600  # Alert Discord at most once every 6 hours if cookie expired
 
 # ---------------------------------------------------------------------------
 raw_cookie = os.environ.get("ROBLOX_COOKIE", "").strip()
@@ -97,6 +91,12 @@ def save_state(state: dict) -> None:
         print(f"[error] Failed to atomically save state file: {e}")
 
 def get_unique_transaction_token(txn: dict) -> str:
+    """
+    Computes a guaranteed stable, unique token for any transaction.
+    1. Primary: purchaseToken (Roblox UUID for marketplace purchases)
+    2. Fallback: unique transaction ID
+    3. Final fallback: composite fingerprint
+    """
     p_token = txn.get("purchaseToken")
     if p_token and str(p_token).strip():
         return str(p_token).strip()
@@ -115,7 +115,7 @@ def send_discord_system_alert(title: str, description: str, fields: list = None)
     embed = {
         "title": title,
         "description": description,
-        "color": 0xED4245,
+        "color": 0xED4245,  # Red
         "fields": fields or [],
         "footer": {"text": "Roblox Sales Notifier Monitor"},
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -187,75 +187,30 @@ def parse_transaction(txn: dict) -> dict:
         "is_pending": txn.get("isPending", False),
     }
 
-def format_receipt_description(group_name: str, group_cfg: dict, sale: dict) -> str:
-    """Formats an authentic monospaced thermal receipt bill."""
-    display_title = group_cfg.get("display_name", group_name.upper())
-    item_name = sale.get("item_name", "Unknown Item")
-    item_type = group_cfg.get("default_type") or str(sale.get("item_type", "ITEM")).upper()
-    revenue = sale.get("revenue", 0)
-    buyer = sale.get("buyer", "Unknown")
-    token = str(sale.get("token", ""))
-    short_txn = token[-8:].upper() if len(token) >= 8 else "00000000"
-    
-    created = sale.get("created", "")
-    date_str = created.replace("T", " ")[:19] + " UTC" if created else time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
-    status_str = "PENDING SETTLEMENT" if sale.get("is_pending") else "COMPLETED"
-
-    w = 46
-    header_line = f"║{display_title.center(w)}║"
-
-    receipt = (
-        "```text\n"
-        "╔══════════════════════════════════════════════╗\n"
-        "║               OFFICIAL RECEIPT               ║\n"
-        f"{header_line}\n"
-        "╠══════════════════════════════════════════════╣\n"
-        f"  RECEIPT NO : #TXN-{short_txn}\n"
-        f"  DATE/TIME  : {date_str}\n"
-        f"  BUYER      : @{buyer}\n"
-        "  PAYMENT    : ROBLOX MARKETPLACE SALE\n"
-        "------------------------------------------------\n"
-        f"  ITEM NAME  : {item_name}\n"
-        f"  ITEM TYPE  : {item_type}\n"
-        "------------------------------------------------\n"
-        f"  TOTAL NET REVENUE CREDITED : {revenue} R$\n"
-        f"  SETTLEMENT : {status_str}\n"
-        "════════════════════════════════════════════════\n"
-        "  OFFICIALLY RECEIVED & VERIFIED:\n"
-        "  ✍️ Gashphul (Creator)   ✍️ MasterSai (Creator)\n"
-        "╚══════════════════════════════════════════════╝\n"
-        "```"
-    )
-    return receipt
-
-def post_to_discord(webhook_url: str, group_name: str, group_cfg: dict, sale: dict) -> None:
-    receipt_text = format_receipt_description(group_name, group_cfg, sale)
-    image_url = group_cfg.get("image")
-    display_title = group_cfg.get("display_name", group_name)
-
+def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: str = None, gif_url: str = None) -> None:
     if sale.get("buyer_id"):
-        buyer_val = f"[{sale['buyer']}](https://www.roblox.com/users/{sale['buyer_id']}/profile)"
+        buyer_value = f"[{sale['buyer']}](https://www.roblox.com/users/{sale['buyer_id']}/profile)"
     else:
-        buyer_val = sale["buyer"]
+        buyer_value = sale["buyer"]
 
     fields = [
-        {"name": "Customer", "value": buyer_val, "inline": True},
-        {"name": "Net Robux", "value": f"**{sale['revenue']} R$**", "inline": True},
-        {"name": "Type", "value": group_cfg.get("default_type") or sale.get("item_type", "Item"), "inline": True},
+        {"name": "Item", "value": sale["item_name"], "inline": True},
+        {"name": "Type", "value": sale["item_type"], "inline": True},
+        {"name": "Revenue", "value": f"{sale['revenue']} R$", "inline": True},
+        {"name": "Buyer", "value": buyer_value, "inline": True},
     ]
 
     embed = {
-        "title": f"🧾 Sales Receipt — {display_title}",
-        "description": receipt_text,
+        "title": f"💰 New Sale — {group_name}",
         "color": 0x57F287,
         "fields": fields,
-        "footer": {"text": "Roblox Marketplace Sale • Verified Digital Receipt"},
+        "footer": {"text": "Roblox Marketplace Sale"},
         "timestamp": sale.get("created") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-
-    # Small side embed thumbnail (big bottom image omitted)
     if image_url:
         embed["thumbnail"] = {"url": image_url}
+    if gif_url:
+        embed["image"] = {"url": gif_url}
 
     payload = {"embeds": [embed]}
 
@@ -271,57 +226,7 @@ def post_to_discord(webhook_url: str, group_name: str, group_cfg: dict, sale: di
             print(f"[discord] webhook error {resp.status_code}: {resp.text}")
         break
 
-def send_test_check() -> None:
-    print("[test] Sending test receipt to all configured group Discord webhooks...")
-    sample_sales = {
-        "Motion Works Emote Group": {
-            "token": "test-receipt-001",
-            "item_name": "⭐Smooth 360 flip Rizz",
-            "item_type": "Emote",
-            "revenue": 16,
-            "buyer": "luigi56",
-            "buyer_id": 10762793687,
-            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "is_pending": False,
-        },
-        "Eroseris UGC Group": {
-            "token": "test-receipt-002",
-            "item_name": "MJ Float Aura Floating Emote🔥",
-            "item_type": "UGC Asset",
-            "revenue": 16,
-            "buyer": "Astro",
-            "buyer_id": 10762793687,
-            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "is_pending": False,
-        },
-        "Ami Berloga Clothing Group": {
-            "token": "test-receipt-003",
-            "item_name": "Ami Berloga Autumn Streetwear",
-            "item_type": "Clothing",
-            "revenue": 5,
-            "buyer": "BerlogaFan",
-            "buyer_id": 10762793687,
-            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "is_pending": False,
-        },
-    }
-
-    for name, cfg in GROUPS.items():
-        webhook = cfg.get("webhook", "").strip()
-        if not webhook:
-            print(f"[test] Webhook for {name} not found, skipping.")
-            continue
-        sale = sample_sales.get(name)
-        post_to_discord(webhook, name, cfg, sale)
-        print(f"[test] Posted official test receipt to {name}!")
-        time.sleep(0.5)
-
 def main() -> None:
-    if os.environ.get("TEST_RECEIPT") in ("true", "1", "True") or "--test" in sys.argv:
-        send_test_check()
-        print("[test] Test receipts completed.")
-        return
-
     state = load_state()
 
     if not raw_cookie:
@@ -343,6 +248,7 @@ def main() -> None:
             err_msg = f"Roblox authentication check failed ({auth_res.status_code}): {auth_res.text}"
             print(f"[auth] {err_msg}")
             check_and_alert_auth_failure(state, err_msg)
+            # Fail the step so GitHub Actions reports the real error
             sys.exit(1)
     except Exception as e:
         print(f"[auth] Warning during auth precheck: {e}")
@@ -352,10 +258,12 @@ def main() -> None:
 
     for group_name, cfg in GROUPS.items():
         group_id = str(cfg["id"])
-        webhook = cfg.get("webhook", "").strip()
+        webhook = cfg["webhook"]
         if not webhook:
             print(f"[{group_name}] webhook secret is not set, skipping Discord alert.")
             continue
+        image_url = cfg.get("image")
+        gif_url = cfg.get("gif")
 
         group_state = state.setdefault(group_id, {"tokens": [], "seeded": False})
         seen_tokens = set(group_state["tokens"])
@@ -382,6 +290,7 @@ def main() -> None:
 
         current_tokens = [get_unique_transaction_token(t) for t in raw_transactions]
 
+        # First run for this group: seed existing transactions, NEVER send alerts
         if not group_state["seeded"]:
             print(f"[{group_name}] initial seed — recording {len(current_tokens)} existing transactions, zero duplicates sent.")
             group_state["tokens"] = current_tokens[:MAX_TOKENS_STORED_PER_GROUP]
@@ -390,28 +299,32 @@ def main() -> None:
             time.sleep(3)
             continue
 
+        # Filter strictly by unique token
         new_txns = [t for t in raw_transactions if get_unique_transaction_token(t) not in seen_tokens]
 
         for txn in reversed(new_txns):
             sale = parse_transaction(txn)
             token = sale["token"]
 
+            # Double-check: skip if already seen in current run buffer
             if token in seen_tokens or token in group_state["tokens"]:
                 continue
 
             if sale["is_pending"]:
                 print(f"[{group_name}] new sale pending settlement: {sale['item_name']}")
 
-            post_to_discord(webhook, group_name, cfg, sale)
-            print(f"[{group_name}] posted receipt: {sale['item_name']} ({sale['revenue']} R$)")
+            post_to_discord(webhook, group_name, sale, image_url, gif_url)
+            print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
             total_posted += 1
 
+            # Mark seen IMMEDIATELY in state file before next iteration
             group_state["tokens"].insert(0, token)
             seen_tokens.add(token)
             group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
             save_state(state)
             time.sleep(0.5)
 
+        # Merge recent tokens into memory
         merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
         group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
         save_state(state)

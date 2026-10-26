@@ -1,13 +1,7 @@
 name: Check Roblox Sales
 
 on:
-  workflow_dispatch:
-    inputs:
-      test_receipt:
-        description: 'Send test receipt to Discord webhooks'
-        required: false
-        type: boolean
-        default: false
+  workflow_dispatch: {}
   schedule:
     - cron: '*/5 * * * *'
 
@@ -44,7 +38,6 @@ jobs:
           WEBHOOK_MOTION_WORKS: ${{ secrets.WEBHOOK_MOTION_WORKS }}
           WEBHOOK_EROSERIS: ${{ secrets.WEBHOOK_EROSERIS }}
           WEBHOOK_AMI_BERLOGA: ${{ secrets.WEBHOOK_AMI_BERLOGA }}
-          TEST_RECEIPT: ${{ inputs.test_receipt }}
         run: python scripts/check_sales.py
 
       - name: Commit updated state file
