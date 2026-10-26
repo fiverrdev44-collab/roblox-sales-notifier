@@ -271,7 +271,57 @@ def post_to_discord(webhook_url: str, group_name: str, group_cfg: dict, sale: di
             print(f"[discord] webhook error {resp.status_code}: {resp.text}")
         break
 
+def send_test_check() -> None:
+    print("[test] Sending test receipt to all configured group Discord webhooks...")
+    sample_sales = {
+        "Motion Works Emote Group": {
+            "token": "test-receipt-001",
+            "item_name": "⭐Smooth 360 flip Rizz",
+            "item_type": "Emote",
+            "revenue": 16,
+            "buyer": "luigi56",
+            "buyer_id": 10762793687,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "is_pending": False,
+        },
+        "Eroseris UGC Group": {
+            "token": "test-receipt-002",
+            "item_name": "MJ Float Aura Floating Emote🔥",
+            "item_type": "UGC Asset",
+            "revenue": 16,
+            "buyer": "Astro",
+            "buyer_id": 10762793687,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "is_pending": False,
+        },
+        "Ami Berloga Clothing Group": {
+            "token": "test-receipt-003",
+            "item_name": "Ami Berloga Autumn Streetwear",
+            "item_type": "Clothing",
+            "revenue": 5,
+            "buyer": "BerlogaFan",
+            "buyer_id": 10762793687,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "is_pending": False,
+        },
+    }
+
+    for name, cfg in GROUPS.items():
+        webhook = cfg.get("webhook", "").strip()
+        if not webhook:
+            print(f"[test] Webhook for {name} not found, skipping.")
+            continue
+        sale = sample_sales.get(name)
+        post_to_discord(webhook, name, cfg, sale)
+        print(f"[test] Posted official test receipt to {name}!")
+        time.sleep(0.5)
+
 def main() -> None:
+    if os.environ.get("TEST_RECEIPT") in ("true", "1", "True") or "--test" in sys.argv:
+        send_test_check()
+        print("[test] Test receipts completed.")
+        return
+
     state = load_state()
 
     if not raw_cookie:
