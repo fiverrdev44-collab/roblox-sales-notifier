@@ -1,5 +1,5 @@
 """
-Roblox sales notifier that posts sales from 3 groups to Discord webhooks.
+Roblox sales notifier that posts sales from configured groups to Discord webhooks.
 Uses multi-tiered transaction deduplication (purchaseToken + unique ID fallback).
 Guarantees ZERO duplicates across cookie failures, restarts, or runner timeouts.
 """
@@ -28,6 +28,11 @@ GROUPS = {
         "id": 470988244,
         "webhook": os.environ.get("WEBHOOK_AMI_BERLOGA", "").strip(),
         "gif": "https://i.imgur.com/D62FF8H.jpeg",
+    },
+    "/Background Check": {
+        "id": 852118640,
+        "webhook": os.environ.get("WEBHOOK_BACKGROUND_CHECK", "").strip(),
+        "gif": "https://i.imgur.com/0XCzCSl.png",
     },
 }
 

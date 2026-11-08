@@ -38,6 +38,7 @@ jobs:
           WEBHOOK_MOTION_WORKS: ${{ secrets.WEBHOOK_MOTION_WORKS }}
           WEBHOOK_EROSERIS: ${{ secrets.WEBHOOK_EROSERIS }}
           WEBHOOK_AMI_BERLOGA: ${{ secrets.WEBHOOK_AMI_BERLOGA }}
+          WEBHOOK_BACKGROUND_CHECK: ${{ secrets.WEBHOOK_BACKGROUND_CHECK }}
         run: python scripts/check_sales.py
 
       - name: Commit updated state file
