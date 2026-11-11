@@ -1,13 +1,15 @@
 """
 Roblox sales notifier that posts sales from configured groups to Discord webhooks.
-Uses multi-tiered transaction deduplication (purchaseToken + unique ID fallback).
-Guarantees ZERO duplicates across cookie failures, restarts, or runner timeouts.
+Uses a durable transaction ledger and at-most-once delivery attempts.
+Ambiguous Discord outcomes are retained for review, never automatically resent.
 """
 
 import json
 import os
+import subprocess
 import sys
 import time
+import uuid
 import requests
 
 # ---------------------------------------------------------------------------
@@ -38,7 +40,6 @@ GROUPS = {
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_seen.json")
 DEBUG = False
-MAX_TOKENS_STORED_PER_GROUP = 500  # Holds last 500 transactions per group
 ALERT_COOLDOWN_SECONDS = 6 * 3600  # Alert Discord at most once every 6 hours if cookie expired
 
 # ---------------------------------------------------------------------------
@@ -66,38 +67,65 @@ def get_session() -> requests.Session:
     return session
 
 def load_state() -> dict:
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE) as f:
-                raw = json.load(f)
-        except Exception as e:
-            print(f"[warning] Failed to load state file: {e}")
-            raw = {}
-    else:
-        raw = {}
-
-    migrated = {}
+    # Missing/corrupt history must stop delivery, not silently reset deduplication.
+    with open(STATE_FILE) as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError("Sale ledger must be a JSON object")
     for group_id, value in raw.items():
         if group_id == "_meta":
-            migrated["_meta"] = value
-        elif isinstance(value, dict) and "tokens" in value:
-            migrated[group_id] = value
-        else:
-            migrated[group_id] = {"tokens": [], "seeded": False}
-    return migrated
+            continue
+        if (not isinstance(value, dict)
+                or not isinstance(value.get("tokens"), list)
+                or not all(isinstance(token, str) and token for token in value["tokens"])
+                or not isinstance(value.get("seeded"), bool)
+                or not isinstance(value.get("delivery_issues", {}), dict)):
+            raise ValueError(f"Invalid sale ledger for group {group_id}")
+    return raw
 
 def save_state(state: dict) -> None:
-    try:
-        temp_file = STATE_FILE + ".tmp"
-        with open(temp_file, "w") as f:
-            json.dump(state, f, indent=2)
-        os.replace(temp_file, STATE_FILE)
-    except Exception as e:
-        print(f"[error] Failed to atomically save state file: {e}")
+    temp_file = STATE_FILE + ".tmp"
+    with open(temp_file, "w") as f:
+        json.dump(state, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temp_file, STATE_FILE)
+
+
+def persist_state(state: dict) -> None:
+    """Checkpoint before sending; a rejected push must abort without rebasing."""
+    save_state(state)
+    if (os.environ.get("PERSIST_STATE_TO_GIT") != "1"
+            and os.environ.get("GITHUB_ACTIONS") != "true"):
+        return
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(STATE_FILE)))
+    path = os.path.relpath(STATE_FILE, repo)
+
+    def git(*args, check=True):
+        return subprocess.run(["git", *args], cwd=repo, check=check, timeout=45)
+
+    git("add", "--", path)
+    diff = git("diff", "--cached", "--quiet", "--", path, check=False)
+    if diff.returncode not in (0, 1):
+        raise RuntimeError("Could not inspect staged sale ledger")
+    if diff.returncode == 1:
+        git("commit", "-m", "Checkpoint sale delivery ledger", "--", path)
+    # Always confirm the remote checkpoint, including after a prior failed push.
+    # Never rebase a stale claim and then send: another run may own that sale.
+    git("push", "origin", "HEAD:refs/heads/main")
+
+
+class DiscordRejected(RuntimeError):
+    """Discord definitively rejected the request; a later retry is safe."""
+
+
+class DiscordUncertain(RuntimeError):
+    """Discord may have accepted the request; automatic retry risks a duplicate."""
 
 def get_unique_transaction_token(txn: dict) -> str:
     """
-    Computes a guaranteed stable, unique token for any transaction.
+    Prefer Roblox's purchase token, then transaction ID, then legacy fingerprint.
     1. Primary: purchaseToken (Roblox UUID for marketplace purchases)
     2. Fallback: unique transaction ID
     3. Final fallback: composite fingerprint
@@ -169,7 +197,7 @@ def check_and_alert_auth_failure(state: dict, error_msg: str) -> None:
             ]
         )
         meta["last_auth_alert"] = now
-        save_state(state)
+        persist_state(state)
 
 def fetch_transactions(session: requests.Session, group_id: int) -> list:
     url = f"https://economy.roblox.com/v2/groups/{group_id}/transactions"
@@ -221,15 +249,80 @@ def post_to_discord(webhook_url: str, group_name: str, sale: dict, image_url: st
 
     max_retries = 3
     for attempt in range(max_retries):
-        resp = requests.post(webhook_url, json=payload, timeout=15)
+        try:
+            resp = requests.post(webhook_url, params={"wait": "true"}, json=payload,
+                                 timeout=15, allow_redirects=False)
+        except requests.RequestException as exc:
+            # Do not log exceptions containing a webhook URL/token.
+            raise DiscordUncertain(f"Discord transport error: {type(exc).__name__}") from None
         if resp.status_code == 429:
-            retry_after = resp.json().get("retry_after", 1.5)
+            if attempt == max_retries - 1:
+                raise DiscordRejected("Discord rate limit exhausted; retry next run")
+            try:
+                retry_after = max(0.0, float(resp.json().get("retry_after", 1.5)))
+            except (ValueError, TypeError, AttributeError):
+                raise DiscordRejected("Invalid Discord rate-limit response") from None
+            if not 0 <= retry_after <= 30:
+                raise DiscordRejected("Discord requested a long rate-limit delay")
             print(f"[discord] rate limited, waiting {retry_after}s (attempt {attempt + 1}/{max_retries})")
             time.sleep(retry_after)
             continue
-        if resp.status_code >= 300:
-            print(f"[discord] webhook error {resp.status_code}: {resp.text}")
-        break
+        if 200 <= resp.status_code < 300:
+            return
+        if 400 <= resp.status_code < 500 and resp.status_code != 408:
+            raise DiscordRejected(f"Discord rejected webhook: HTTP {resp.status_code}")
+        raise DiscordUncertain(f"Unconfirmed Discord response: HTTP {resp.status_code}")
+
+
+def process_transactions(state: dict, group_name: str, cfg: dict, transactions: list) -> int:
+    group_id = str(cfg["id"])
+    group = state.setdefault(group_id, {"tokens": [], "seeded": False})
+    seen = set(group["tokens"])
+    issues = group.setdefault("delivery_issues", {})
+    if not group["seeded"]:
+        group["tokens"] = list(dict.fromkeys(get_unique_transaction_token(t) for t in transactions))
+        group["seeded"] = True
+        persist_state(state)
+        print(f"[{group_name}] initial seed — recorded existing transactions without posting")
+        return 0
+
+    if issues:
+        print(f"::warning::Group {group_id} has {len(issues)} unconfirmed delivery attempt(s); not retrying")
+    posted = 0
+    for txn in reversed(transactions):
+        sale = parse_transaction(txn)
+        token = sale["token"]
+        if token in seen:
+            continue
+        # Reserve durably BEFORE the external side effect. A killed runner or
+        # an ambiguous HTTP outcome leaves this token blocked on the next run.
+        group["tokens"].insert(0, token)
+        seen.add(token)
+        issues[token] = {
+            "status": "unconfirmed",
+            "created": sale.get("created"),
+            # Distinct claims must produce distinct commits even in the same
+            # second, so two stale runners cannot both push an identical claim.
+            "attempt_id": uuid.uuid4().hex,
+        }
+        persist_state(state)
+        try:
+            post_to_discord(cfg["webhook"], group_name, sale, cfg.get("image"), cfg.get("gif"))
+        except DiscordRejected:
+            # A definitive rejection did not create a message. Release for retry.
+            group["tokens"].remove(token)
+            issues.pop(token)
+            persist_state(state)
+            raise
+        except DiscordUncertain:
+            print(f"::error::Group {group_id}: delivery unconfirmed; reserved sale will not be resent")
+            raise
+        issues.pop(token)
+        persist_state(state)
+        posted += 1
+        print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
+        time.sleep(0.5)
+    return posted
 
 def main() -> None:
     state = load_state()
@@ -267,12 +360,6 @@ def main() -> None:
         if not webhook:
             print(f"[{group_name}] webhook secret is not set, skipping Discord alert.")
             continue
-        image_url = cfg.get("image")
-        gif_url = cfg.get("gif")
-
-        group_state = state.setdefault(group_id, {"tokens": [], "seeded": False})
-        seen_tokens = set(group_state["tokens"])
-
         try:
             raw_transactions = fetch_transactions(session, int(group_id))
         except requests.HTTPError as e:
@@ -293,46 +380,7 @@ def main() -> None:
 
         print(f"[{group_name}] fetched {len(raw_transactions)} transaction(s)")
 
-        current_tokens = [get_unique_transaction_token(t) for t in raw_transactions]
-
-        # First run for this group: seed existing transactions, NEVER send alerts
-        if not group_state["seeded"]:
-            print(f"[{group_name}] initial seed — recording {len(current_tokens)} existing transactions, zero duplicates sent.")
-            group_state["tokens"] = current_tokens[:MAX_TOKENS_STORED_PER_GROUP]
-            group_state["seeded"] = True
-            save_state(state)
-            time.sleep(3)
-            continue
-
-        # Filter strictly by unique token
-        new_txns = [t for t in raw_transactions if get_unique_transaction_token(t) not in seen_tokens]
-
-        for txn in reversed(new_txns):
-            sale = parse_transaction(txn)
-            token = sale["token"]
-
-            # Double-check: skip if already seen in current run buffer
-            if token in seen_tokens or token in group_state["tokens"]:
-                continue
-
-            if sale["is_pending"]:
-                print(f"[{group_name}] new sale pending settlement: {sale['item_name']}")
-
-            post_to_discord(webhook, group_name, sale, image_url, gif_url)
-            print(f"[{group_name}] posted sale: {sale['item_name']} ({sale['revenue']} R$)")
-            total_posted += 1
-
-            # Mark seen IMMEDIATELY in state file before next iteration
-            group_state["tokens"].insert(0, token)
-            seen_tokens.add(token)
-            group_state["tokens"] = group_state["tokens"][:MAX_TOKENS_STORED_PER_GROUP]
-            save_state(state)
-            time.sleep(0.5)
-
-        # Merge recent tokens into memory
-        merged = current_tokens + [t for t in group_state["tokens"] if t not in current_tokens]
-        group_state["tokens"] = merged[:MAX_TOKENS_STORED_PER_GROUP]
-        save_state(state)
+        total_posted += process_transactions(state, group_name, cfg, raw_transactions)
         time.sleep(3)
 
     if had_auth_error:
@@ -343,3 +391,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
