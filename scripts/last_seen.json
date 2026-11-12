@@ -841,12 +841,6 @@
       "d0b1fc0c-7c0b-48a3-92a5-61fdfb9f951f"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "5ce20ed5-081b-428a-a0e5-01b8a1ed1eba": {
-        "status": "unconfirmed",
-        "created": "2026-11-12T03:01:35.001Z",
-        "attempt_id": "d331e381df3c4dd99466326513be0c1d"
-      }
-    }
+    "delivery_issues": {}
   }
 }
