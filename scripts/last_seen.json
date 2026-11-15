@@ -800,13 +800,7 @@
       "33ee021b-17a0-44e2-9608-11db339cd250"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "c96b4ff8-40c9-4c35-af51-2edcf8572180": {
-        "status": "unconfirmed",
-        "created": "2026-11-15T20:52:55.902Z",
-        "attempt_id": "b01f18e3e5d44890baa925495c5ccad4"
-      }
-    }
+    "delivery_issues": {}
   },
   "470988244": {
     "tokens": [
