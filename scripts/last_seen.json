@@ -522,13 +522,7 @@
       "3e4c6812-f149-4923-8680-ec32fc0b6488"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "36d55ec2-259b-498c-8e5b-7b5bd5e93309": {
-        "status": "unconfirmed",
-        "created": "2026-11-15T01:30:13.064Z",
-        "attempt_id": "61181a313150471ca294a83198411e05"
-      }
-    }
+    "delivery_issues": {}
   },
   "376787388": {
     "tokens": [
