@@ -541,13 +541,7 @@
       "3e4c6812-f149-4923-8680-ec32fc0b6488"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "c3db8b76-3e9f-42c1-bb9a-ee8a09118ca7": {
-        "status": "unconfirmed",
-        "created": "2026-11-21T08:22:28.879Z",
-        "attempt_id": "79dab60329f54bc1aa74d894afb47172"
-      }
-    }
+    "delivery_issues": {}
   },
   "376787388": {
     "tokens": [
