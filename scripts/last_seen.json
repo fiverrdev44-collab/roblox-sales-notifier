@@ -877,13 +877,7 @@
       "97caa17d-842d-4d13-a30f-ae64be2fe1ab"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "c8cbf841-4cd4-4e1c-ad5f-37b116126ea0": {
-        "status": "unconfirmed",
-        "created": "2026-11-21T21:27:51.642Z",
-        "attempt_id": "987f204e7d8f4f058bc0406fc7d9b662"
-      }
-    }
+    "delivery_issues": {}
   },
   "_meta": {
     "last_auth_alert": 1792851021.003608
