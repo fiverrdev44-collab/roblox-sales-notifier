@@ -821,6 +821,7 @@
   },
   "470988244": {
     "tokens": [
+      "c8cbf841-4cd4-4e1c-ad5f-37b116126ea0",
       "33d985f3-e3c5-4d5b-ad35-52476b2aac02",
       "6a533262-e9ab-4e3e-bd9e-c4670f0d72cd",
       "945693cd-6f4e-46b0-996b-3623b74e2979",
@@ -876,7 +877,13 @@
       "97caa17d-842d-4d13-a30f-ae64be2fe1ab"
     ],
     "seeded": true,
-    "delivery_issues": {}
+    "delivery_issues": {
+      "c8cbf841-4cd4-4e1c-ad5f-37b116126ea0": {
+        "status": "unconfirmed",
+        "created": "2026-11-21T21:27:51.642Z",
+        "attempt_id": "987f204e7d8f4f058bc0406fc7d9b662"
+      }
+    }
   },
   "_meta": {
     "last_auth_alert": 1792851021.003608
