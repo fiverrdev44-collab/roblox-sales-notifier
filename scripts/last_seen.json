@@ -1,6 +1,7 @@
 {
   "181575178": {
     "tokens": [
+      "45b25c69-dd45-46f0-9e80-f92be8b74b8b",
       "7440e2e4-5298-4108-a4e5-7dfaf5162f3e",
       "d7045811-5523-48d1-abd1-0eb7682fcce8",
       "c3db8b76-3e9f-42c1-bb9a-ee8a09118ca7",
@@ -543,7 +544,13 @@
       "3e4c6812-f149-4923-8680-ec32fc0b6488"
     ],
     "seeded": true,
-    "delivery_issues": {}
+    "delivery_issues": {
+      "45b25c69-dd45-46f0-9e80-f92be8b74b8b": {
+        "status": "unconfirmed",
+        "created": "2026-11-22T03:57:32.231Z",
+        "attempt_id": "e178ed3e45ff44648263ee879ebe5566"
+      }
+    }
   },
   "376787388": {
     "tokens": [
