@@ -837,13 +837,7 @@
       "33ee021b-17a0-44e2-9608-11db339cd250"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "5f8066c1-3e2a-48d8-a1ef-6469a96c3aae": {
-        "status": "unconfirmed",
-        "created": "2026-11-24T19:42:51.429Z",
-        "attempt_id": "96677b316add41aabaa145d4ab9b1c26"
-      }
-    }
+    "delivery_issues": {}
   },
   "470988244": {
     "tokens": [
