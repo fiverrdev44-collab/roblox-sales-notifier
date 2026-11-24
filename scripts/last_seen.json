@@ -893,13 +893,7 @@
       "97caa17d-842d-4d13-a30f-ae64be2fe1ab"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "d12eb07b-58f2-490e-bd69-d1e13951714a": {
-        "status": "unconfirmed",
-        "created": "2026-11-24T05:43:22.579Z",
-        "attempt_id": "7e784277e9ec46409c301fcc99b8e368"
-      }
-    }
+    "delivery_issues": {}
   },
   "_meta": {
     "last_auth_alert": 1792851021.003608
