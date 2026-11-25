@@ -976,12 +976,6 @@
       "d0b1fc0c-7c0b-48a3-92a5-61fdfb9f951f"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "9aba2c34-f6b2-481e-a205-85b69bf46c58": {
-        "status": "unconfirmed",
-        "created": "2026-11-25T07:31:59.423Z",
-        "attempt_id": "ad0b830d88f4465a91438d2ba891ba84"
-      }
-    }
+    "delivery_issues": {}
   }
 }
