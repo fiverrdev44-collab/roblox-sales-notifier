@@ -993,12 +993,6 @@
       "d0b1fc0c-7c0b-48a3-92a5-61fdfb9f951f"
     ],
     "seeded": true,
-    "delivery_issues": {
-      "b9a28d36-718d-43f8-83d4-a700198d04bd": {
-        "status": "unconfirmed",
-        "created": "2026-11-27T05:51:44.425Z",
-        "attempt_id": "73c0a319a23148b5b42f3011f518213a"
-      }
-    }
+    "delivery_issues": {}
   }
 }
