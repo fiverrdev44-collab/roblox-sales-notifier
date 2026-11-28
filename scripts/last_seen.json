@@ -920,6 +920,7 @@
   },
   "852118640": {
     "tokens": [
+      "fea1a358-0ca7-40ae-9354-a3b13fef7a10",
       "05a2f1ff-5905-4816-8817-8fa2fbedb4c3",
       "e6e89ac1-c0e9-40ab-85aa-f13b8378d172",
       "a249389c-28e4-4a62-91a0-a905d630c1ad",
@@ -1009,6 +1010,12 @@
       "d0b1fc0c-7c0b-48a3-92a5-61fdfb9f951f"
     ],
     "seeded": true,
-    "delivery_issues": {}
+    "delivery_issues": {
+      "fea1a358-0ca7-40ae-9354-a3b13fef7a10": {
+        "status": "unconfirmed",
+        "created": "2026-11-28T16:41:21.895Z",
+        "attempt_id": "5645804447a3461ba4a8fbad04a5a27a"
+      }
+    }
   }
 }
